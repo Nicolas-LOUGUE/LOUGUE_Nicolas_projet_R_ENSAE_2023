@@ -1,0 +1,294 @@
+---
+title: "Rendu rapport du projet"
+author: "Nicolas_LOUGUE"
+date: "`r Sys.Date()`"
+output:
+  word_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Partie 1
+
+## Importation et mise en forme
+
+Nous chargeons tous les packages que nous aurons besoin pour notre travail.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+library(readxl) # ce package permet l'importation des bases de données en formant Excel
+library(gt) # ce package permet de construire des tableaux
+library(tidyverse) #
+library(dplyr)
+library(flextable) #npermet de construire des tableaux
+library(janitor) # permet le traitement des bases de données
+library(tidyr)
+library(gtsummary)
+library(xfun)
+library(lubridate) #pour manipuler les dates
+```
+
+Après avoir charger tous les packages que nous aurons besoin au cours de notre TP, nous importons la base d'étude
+
+```{r Importation_base}
+# importation de la base de données
+projet <-data.frame(readxl:: read_xlsx("Base_Partie 1.xlsx")) 
+
+```
+
+Tableau des valeurs manquantes par variables
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+# Calculer le nombre de valeurs manquantes par variable
+NA_tableau <- projet %>%
+  summarise(across(everything(), ~ sum(is.na(.)))) %>%
+  pivot_longer(everything(), names_to = "variable", values_to = "Nombre de valeurs manquantes")
+
+Tableau <- gt(NA_tableau, rowname_col = "rowname")
+Tableau
+
+```
+
+Vérification si la clé key ne contient pas de valeurs manquantes
+
+```{r echo=TRUE}
+# Vérifier si la variable "key" contient des valeurs manquantes
+
+ifelse(any(is.na(projet$key)),"valeurs manquantes","La variable key n'a pas de valeurs manquantes")
+```
+
+## Création de variables
+
+Renommage et création de nouvelles variables
+Là, nous renommons respectivement les variables "q1", "q2" et "q23" en region, departement et sexe.
+```{r message=FALSE, warning=FALSE}
+projet_1 <- projet %>% rename(region=q1, departement=q2, sexe= q23)
+projet_1 <- projet_1 %>%
+  dplyr::mutate(sexe_2=recode(sexe,"Femme"="1","Homme"="0"))
+
+langues <- data.frame(key=projet_1$key, dplyr::select(projet_1,starts_with("q24a")))
+langues <- langues %>% dplyr::mutate(parle=rowSums(langues[,2:length(langues)]))
+langues <- langues %>% dplyr::select(key,parle)
+data <- merge.data.frame(projet_1, langues, by= "key")
+```
+
+## Analyse descriptive
+
+### Analyse descriptive univariée
+
+```{r}
+##### Types de variables
+stat_des <- data[c("sexe", "q25","q12","q81")]
+stat_des_1 <- stat_des %>% rename( "Niveau instruction"=q25, "Statut juridique"=q12, "Propriétaire/Non propriétaire"=q81)
+
+```
+
+Résultats
+
+```{r echo=TRUE}
+# Summary
+stat_des_1 %>% tbl_summary() #table de résumé des variables d'intérêt
+```
+
+### Analyse descriptive bivariée
+
+```{r message=FALSE, warning=FALSE}
+tc_1 <- stat_des_1 %>%
+  gtsummary::tbl_cross(
+    row = "Statut juridique",
+    col =  sexe,
+    percent = "row"
+  ) %>%
+  add_p(source_note = FALSE) ## ajouter les p-value en précisant le test réalisé
+
+tc_2 <- stat_des_1 %>%
+  gtsummary::tbl_cross(
+    row =  "Niveau instruction",
+    col = sexe,
+    percent = "row"
+  ) %>%
+  add_p(source_note = FALSE) ## ajouter les p-value en précisant le test réalisé
+
+tc_3 <- stat_des_1 %>%
+  gtsummary::tbl_cross(
+    row =  "Propriétaire/Non propriétaire",
+    col = sexe,
+    percent = "row"
+  ) %>%
+  add_p(source_note = FALSE) ## ajouter les p-value en précisant le test réalisé
+```
+
+Résultats tableau de contingence
+
+```{r Tableau_contingence, echo=TRUE}
+gtsummary::tbl_stack(tbls=list(tc_1, tc_2, tc_3))
+
+```
+
+
+
+## Cartographie
+
+Nous chargeons les packages utiles pour faire de la cartographie
+
+```{r message=FALSE, warning=FALSE}
+library(sf)
+library(rnaturalearth)
+library(raster)
+library(RColorBrewer)
+```
+
+Conversion du tableau data frame en données géographiques
+
+```{r}
+projet_map <- projet_1 %>% rename(PME=q12)
+  
+```
+
+Représentation spatiale
+
+```{r eval=FALSE, include=FALSE}
+senegal <- ne_states(country = "senegal", returnclass = "sf")
+ggplot(data = senegal) +
+  geom_sf() +
+  labs(title = "Carte du Sénégal")
+```
+```{r}
+senegal_1 <- ne_states(country = "senegal", returnclass = "sf")
+  
+ggplot() +
+  geom_sf(data = senegal_1) +
+  geom_point(data = projet_map, aes( x =gps_menlongitude , y = gps_menlatitude,color = PME)) +
+  facet_wrap(~sexe)+
+  labs(title = "Représentation des PME suivant le sexe du premier responsable")
+
+```
+
+```{r}
+ggplot() +
+  geom_sf(data = senegal_1) +
+  geom_point(data = projet_map, aes( x =gps_menlongitude , y = gps_menlatitude,color = PME)) +
+  facet_wrap(~q25)+
+  labs(title = "Représentation des PME suivant le niveau d'instruction")
+```
+
+# Partie 2
+
+## Nettoyage de la base
+
+```{r}
+data <- readxl::read_xlsx("Base_Partie 2.xlsx", sheet=1)
+
+data_1 <- data%>%
+  dplyr::mutate(destination=ifelse(country_destination < 0, NA,country_destination))
+
+
+# Création de la variable de tranche de 5 ans
+data_1 <- data_1%>%
+  dplyr:: mutate(age_intervalle =cut(age,include.lowest = TRUE,
+                                     right = TRUE, dig.lab = 9,
+                                     breaks = c(15, 20, 25, 30, 35, 40, 45, 50, 55, 65)))
+
+                                 
+
+set.seed(123)
+data_2 <- data_1%>%
+  dplyr:: mutate(groupe=sample(c(0,1), nrow(data_1), replace=TRUE))
+
+
+tab=as.data.frame(table(data_2$enumerator))
+tab<- tab%>%
+  dplyr:: rename(enumerator=Var1, "nombre d'entretien"=Freq)
+
+data_3<- merge(data_2,tab,by="enumerator", all=TRUE)
+
+
+data_4<- readxl::read_xlsx("Base_Partie 2.xlsx", sheet=2)
+
+data_5<- merge(data_3,data_4, by="district",all=TRUE)
+
+data_6 <- data_5 %>% dplyr::mutate(duree_entretien=endtime-starttime) 
+
+duree_moyenne <- dplyr::select(data_6, c("enumerator", "duree_entretien")) %>%
+  dplyr::rename(Id_enquêteur=enumerator) %>%
+  group_by(Id_enquêteur) %>% 
+  summarize(duree_moyen=mean(duree_entretien)) 
+  
+ 
+duree_moyenne %>% flextable()
+
+```
+
+```{r}
+# Renommer les variables d'ensemble avec le préfixe "endline"
+
+noms_colonnes =apply(matrix(colnames(data_6)), 1, function(nom_colonne) {
+  paste0("endline_", nom_colonne)
+})
+
+data_7 <- data_6
+names(data_7) <- unlist(noms_colonnes)
+```
+
+
+
+## Analyse et visualisation des données
+
+Tableau recapitulatif contenant l'âge moyen et le nombre d'enfants moyen par district
+
+```{r echo=TRUE}
+tab_recap <- data_7 %>%
+  group_by(endline_district) %>%
+  summarize(age_moyen = mean(endline_age),
+            enfants_moyen = mean(endline_children_num))
+tab_recap %>% flextable()
+```
+
+Test de différence
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+data_7$Female<-ifelse(data_7$endline_sex==0,1,0)
+data_7$Male<-ifelse(data_7$endline_sex==1,1,0)
+tableau_recap <- data_7 %>%
+  tbl_summary(include=c(Female,Male,endline_age),by = endline_sex, statistic = list(Male~"{p}%", Female~"{p}%",endline_age ~ "{mean}")) %>%
+  #add_p(test = endline_age~ "t.test") %>%
+  add_difference(test=list( Female ~ "t.test", Male ~ "t.test"), pvalue_fun=scales::label_pvalue(accuracy = .0001)
+)
+tableau_recap
+
+```
+
+Nuage de point
+
+```{r echo=TRUE}
+nuage_point <- ggplot(filter(data_7, !(endline_age == 999)), aes(x = endline_age, y = endline_children_num)) + geom_point() +labs(x = "Âge des enquêtées", y = "Nombre d'enfants", title = "Nombre d'enfants par âge des enquêtées")
+nuage_point
+
+```
+
+Estimation de l'effet d'appartenance à un groupe
+
+```{r echo=TRUE}
+modele <-stats::lm(data_7$endline_intention ~ data_7$endline_groupe , data = data_7)
+modele%>% gtsummary::tbl_regression()
+```
+
+Tableau avec 3 modèle
+
+```{r echo=TRUE, message=FALSE}
+modele_A <- modele%>% gtsummary::tbl_regression()
+modele_B<- lm(data_7$endline_intention ~ data_7$endline_age+data_7$endline_sex, data = data_7)%>%tbl_regression()
+modele_C<- lm(data_7$endline_intention ~ data_7$endline_age + data_7$endline_sex + data_7$endline_district, data = data_7)%>%tbl_regression()
+
+gtsummary::tbl_stack(
+list(modele_A,modele_B,modele_C),
+## intitulé des groupes de tableau associés
+group_header  = c("Modèle A","Modèle B","Modèle C")
+)
+```
+
+# Application shiny
+
+Cette partie est dédiée à la mise en place de l'application shiny concernant le présent projet. Vous trouverez dans le document ci-joint le fichier app.R dans le dossier shiny_app_projet_cartographie.
